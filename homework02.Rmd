@@ -1,0 +1,459 @@
+---
+title: "Homework 02"
+subtitle: "ECON 2200 — Fall 2025"
+author: "Ben Kassan"
+date: "September 13, 2025"
+output: pdf_document
+---
+
+Q1a
+
+What the study set out to do:
+
+Bertrand and Mullainathan ran an experiment to test whether employers discriminate based on perceived race. They sent comparable résumés to real job ads in Boston and Chicago, randomly assigning first names that commonly signal either Black or White identities. They also randomized résumé quality (e.g., stronger vs. weaker credentials). The main outcome was whether the employer called the applicant back.
+
+Why this identifies a causal effect:
+
+Because the name signals and résumé quality were randomly assigned, the groups are on average—identical in every respect except the perceived race conveyed by the name. That means any systematic difference in callback rates can be attributed to race, not to unobserved applicant traits. In other words, the randomized design turns the question from correlational to causal. The difference in mean callback rates across name groups is an unbiased estimate of the average causal effect of perceived race on employer interest. The quality randomization also lets them test whether stronger credentials help applicants with Black-sounding names as much as those with White-sounding names. The causal effect is reinforced with a large sample size of 4,870.
+
+Q1b
+
+```{r}
+# Q1(b) Simple Script
+# Economics Statistics Class
+
+# Load data
+resume <- read.csv("/Users/benkassan/Desktop/rdata/ResumeNames.csv", stringsAsFactors = FALSE)
+
+# Recode race from ethnicity
+eth <- tolower(resume$ethnicity)
+race <- ifelse(eth %in% c("afam","black"), "Black-sounding",
+         ifelse(eth %in% c("cauc","white"), "White-sounding", NA))
+
+# Recode callback from call
+cal <- tolower(as.character(resume$call))
+callback <- ifelse(cal %in% c("yes","y","1","true"), 1,
+            ifelse(cal %in% c("no","n","0","false"), 0, NA))
+
+# Keep only rows with race info
+keep <- !is.na(race)
+race <- race[keep]
+callback <- callback[keep]
+
+# Calculate totals and rates
+n <- tapply(callback, race, function(x) sum(!is.na(x)))
+cb <- tapply(callback, race, function(x) sum(x == 1, na.rm = TRUE))
+rate <- cb / n
+
+# Print results
+results <- data.frame(
+  race = names(n),
+  n = as.integer(n),
+  callbacks = as.integer(cb),
+  callback_rate = round(100 * rate, 1),
+  row.names = NULL
+)
+
+print(results)
+
+```
+
+```{r message=FALSE}
+# Q1(c) Graphs by Gender and Race
+
+# Load data
+resume <- read.csv("/Users/benkassan/Desktop/rdata/ResumeNames.csv", stringsAsFactors = FALSE)
+
+# Recode race
+eth <- tolower(resume$ethnicity)
+resume$race <- ifelse(eth %in% c("afam","black"), "Black-sounding",
+                 ifelse(eth %in% c("cauc","white"), "White-sounding", NA))
+
+# Recode callback
+cal <- tolower(as.character(resume$call))
+resume$callback <- ifelse(cal %in% c("yes","y","1","true"), 1,
+                    ifelse(cal %in% c("no","n","0","false"), 0, NA))
+
+# Keep rows with race + gender
+resume <- subset(resume, !is.na(race) & !is.na(gender))
+
+# Summarize by race and gender
+library(dplyr)
+by_group <- resume %>%
+  group_by(race, gender) %>%
+  summarize(rate = mean(callback, na.rm = TRUE), .groups = "drop")
+
+# Plot: grouped bar chart
+library(ggplot2)
+ggplot(by_group, aes(x = race, y = rate, fill = gender)) +
+  geom_col(position = "dodge") +
+  scale_y_continuous(labels = scales::percent_format(accuracy = 1)) +
+  labs(x = "Perceived Race", y = "Callback Rate",
+       title = "Callback Rates by Race and Gender",
+       fill = "Gender") +
+  theme_minimal()
+
+```
+
+In our sample, men received fewer callbacks than women in both perceived race groups. For White-sounding names, women’s callback rate is higher than men’s (9.9% vs. 8.9%); for Black-sounding names, the same pattern holds (6.6% vs. 5.8%). In short, being male is associated with a lower chance of a callback across both groups. The White–Black gap is 3.3 percentage points for women and 3.1 points for men—very similar. Given how small that 0.2-point difference is, I wouldn’t claim a larger discrimination effect for women without a significance test; it’s likely just noise.
+
+2a
+
+```{r}
+# Load required libraries
+library(dplyr)
+library(ggplot2)
+library(tidyr)
+
+# Load and clean the data
+df <- read.csv("/Users/benkassan/Desktop/rdata/ResumeNames.csv", stringsAsFactors = FALSE) %>%
+  mutate(
+    # Standardize race coding
+    race = case_when(
+      tolower(ethnicity) %in% c("afam", "black", "b") ~ "African-American",
+      tolower(ethnicity) %in% c("cauc", "white", "w") ~ "Caucasian",
+      TRUE ~ NA_character_
+    ),
+    # Standardize gender coding
+    gender = case_when(
+      tolower(gender) %in% c("male", "m") ~ "Male",
+      tolower(gender) %in% c("female", "f") ~ "Female",
+      TRUE ~ NA_character_
+    ),
+    # Convert callback to numeric (handle various formats)
+    callback = case_when(
+      tolower(as.character(call)) %in% c("yes", "y", "1", "true") ~ 1,
+      tolower(as.character(call)) %in% c("no", "n", "0", "false") ~ 0,
+      TRUE ~ NA_real_
+    ),
+    # Standardize city names
+    city = tolower(city)
+  ) %>%
+  filter(!is.na(race), !is.na(gender), !is.na(city), !is.na(callback))
+
+# Calculate callback rates by city, gender, and race
+summary_data <- df %>%
+  group_by(city, gender, race) %>%
+  summarize(
+    callback_rate = mean(callback, na.rm = TRUE),
+    n = n(),
+    .groups = "drop"
+  )
+
+# Calculate the racial difference (Caucasian - African-American)
+racial_diff <- summary_data %>%
+  pivot_wider(
+    names_from = race,
+    values_from = c(callback_rate, n),
+    names_sep = "_"
+  ) %>%
+  mutate(
+    # Calculate difference in percentage points
+    diff_pp = (`callback_rate_Caucasian` - `callback_rate_African-American`) * 100,
+    # Create labels
+    diff_label = sprintf("%+.1f pp", diff_pp),
+    # Create sample size labels
+    n_label_white = sprintf("nW=%d", n_Caucasian),
+    n_label_black = sprintf("nB=%d", `n_African-American`)
+  ) %>%
+  # Order factors for proper display
+  mutate(
+    gender = factor(gender, levels = c("Female", "Male")),
+    city = factor(city, levels = c("boston", "chicago"))
+  )
+
+# Create the plot
+p <- ggplot(racial_diff, aes(x = gender, y = diff_pp, fill = gender)) +
+  # Add horizontal line at 0
+  geom_hline(yintercept = 0, linetype = "dashed", color = "grey50", alpha = 0.5) +
+  
+  # Create bars
+  geom_col(width = 0.7, show.legend = FALSE) +
+  
+  # Add difference labels above bars
+  geom_text(aes(label = diff_label), 
+            vjust = -0.5, 
+            size = 5, 
+            fontface = "bold") +
+  
+  # Add sample size for White names
+  geom_text(aes(label = n_label_white, y = diff_pp * 0.3), 
+            hjust = 0.5,
+            size = 3.5, 
+            color = "grey30") +
+  
+  # Add sample size for Black names  
+  geom_text(aes(label = n_label_black, y = diff_pp * 0.5), 
+            hjust = 0.5,
+            size = 3.5, 
+            color = "grey30") +
+  
+  # Facet by city
+  facet_wrap(~ city, nrow = 1, scales = "free_x") +
+  
+  # Custom colors matching the reference image
+  scale_fill_manual(values = c("Female" = "#FF6B6B", "Male" = "#4ECDC4")) +
+  
+  # Set y-axis limits
+  scale_y_continuous(
+    limits = c(-1, 6),
+    breaks = seq(0, 5, 1),
+    expand = c(0, 0)
+  ) +
+  
+  # Labels
+  labs(
+    title = "Racial Difference in Callback Rates by City × Gender",
+    subtitle = "Positive values indicate higher callback rates for Caucasian names",
+    x = NULL,
+    y = "Difference in callback rate (percentage points)"
+  ) +
+  
+  # Clean theme
+  theme_minimal(base_size = 14) +
+  theme(
+    # Title styling
+    plot.title = element_text(face = "bold", size = 16, hjust = 0),
+    plot.subtitle = element_text(size = 12, hjust = 0, color = "grey30"),
+    
+    # Facet styling
+    strip.text = element_text(face = "bold", size = 14),
+    strip.background = element_rect(fill = "grey95", color = NA),
+    
+    # Axis styling
+    axis.text.x = element_text(face = "bold", size = 12),
+    axis.text.y = element_text(size = 11),
+    axis.title.y = element_text(size = 12, margin = margin(r = 10)),
+    
+    # Grid styling
+    panel.grid.major.x = element_blank(),
+    panel.grid.minor = element_blank(),
+    panel.grid.major.y = element_line(color = "grey90"),
+    
+    # Panel spacing
+    panel.spacing = unit(1.5, "lines"),
+    
+    # Overall plot margins
+    plot.margin = margin(10, 10, 10, 10)
+  )
+
+# Display the plot
+print(p)
+
+```
+
+2b
+
+```{r}
+# Load required libraries
+library(dplyr)
+library(ggplot2)
+
+# Load and clean the data
+df <- read.csv("/Users/benkassan/Desktop/rdata/ResumeNames.csv", stringsAsFactors = FALSE) %>%
+  mutate(
+    # Standardize race coding
+    race = case_when(
+      tolower(ethnicity) %in% c("afam", "black", "b") ~ "African-American",
+      tolower(ethnicity) %in% c("cauc", "white", "w") ~ "Caucasian",
+      TRUE ~ NA_character_
+    ),
+    # Convert callback to numeric
+    callback = case_when(
+      tolower(as.character(call)) %in% c("yes", "y", "1", "true") ~ 1,
+      tolower(as.character(call)) %in% c("no", "n", "0", "false") ~ 0,
+      TRUE ~ NA_real_
+    ),
+    # Standardize city names for display
+    city_clean = case_when(
+      tolower(city) == "boston" ~ "Boston",
+      tolower(city) == "chicago" ~ "Chicago",
+      TRUE ~ tools::toTitleCase(tolower(city))
+    )
+  ) %>%
+  filter(!is.na(race), !is.na(city), !is.na(callback), !is.na(jobs))
+
+# Calculate mean callback rate for EACH combination of jobs, race, and city
+# This properly aggregates across ALL applicants (both men and women)
+summary_jobs <- df %>%
+  group_by(jobs, race, city_clean) %>%
+  summarize(
+    callback_rate = mean(callback, na.rm = TRUE) * 100,  # Convert to percentage
+    n = n(),
+    .groups = "drop"
+  )
+
+# Create the plot faceted by race and city as requested
+p <- ggplot(summary_jobs, aes(x = jobs, y = callback_rate)) +
+  
+  # Add line connecting points
+  geom_line(color = "#2C3E50", linewidth = 1.2, alpha = 0.9) +
+  
+  # Add points with size based on sample size
+  geom_point(aes(size = n), color = "#2C3E50", alpha = 0.9) +
+  
+  # Facet by race and city (creates 4 panels: 2 races × 2 cities)
+  facet_grid(race ~ city_clean) +
+  
+  # Size scale for sample sizes
+  scale_size_continuous(
+    range = c(2, 10),
+    breaks = c(100, 300, 500, 700, 900),
+    name = "Sample Size"
+  ) +
+  
+  # X-axis settings
+  scale_x_continuous(
+    breaks = seq(1, 7, 1),
+    limits = c(0.8, 7.2)
+  ) +
+  
+  # Y-axis settings
+  scale_y_continuous(
+    labels = function(x) paste0(x, "%"),
+    limits = c(0, NA),
+    expand = expansion(mult = c(0.02, 0.08))
+  ) +
+  
+  # Labels
+  labs(
+    title = "Impact of Number of Jobs on Callback Rates by Race and City",
+    subtitle = "Mean callback rates aggregated across all applicants",
+    x = "Number of Jobs Listed on Resume",
+    y = "Callback Rate",
+    caption = "Each panel shows a race-city combination. Point size indicates sample size."
+  ) +
+  
+  # Clean theme
+  theme_bw(base_size = 12) +
+  theme(
+    # Title and text
+    plot.title = element_text(face = "bold", size = 16, hjust = 0),
+    plot.subtitle = element_text(size = 12, hjust = 0, color = "grey30"),
+    plot.caption = element_text(size = 9, hjust = 0, color = "grey50", margin = margin(t = 10)),
+    
+    # Facet styling
+    strip.text = element_text(face = "bold", size = 11),
+    strip.background = element_rect(fill = "grey90"),
+    
+    # Legend
+    legend.position = "bottom",
+    legend.title = element_text(face = "bold", size = 10),
+    legend.text = element_text(size = 9),
+    legend.box.margin = margin(t = -5),
+    
+    # Grid
+    panel.grid.minor = element_blank(),
+    panel.grid.major.x = element_line(color = "grey85", linetype = "dotted"),
+    
+    # Spacing
+    panel.spacing = unit(1, "lines"),
+    plot.margin = margin(10, 10, 10, 10),
+    
+    # Axis text
+    axis.text = element_text(size = 10),
+    axis.title = element_text(size = 11)
+  )
+
+# Print the plot
+print(p)
+```
+
+
+3a:
+
+We want to show that for any real numbers $a, b$,
+\[
+\frac{1}{n} \sum_{i=1}^n (a x_i + b) \;=\; a \bar{x} + b,
+\]
+where the sample mean is defined as
+\[
+\bar{x} = \frac{1}{n} \sum_{i=1}^n x_i.
+\]
+
+---
+
+**Proof.**  
+We begin with the left-hand side:
+\[
+\frac{1}{n} \sum_{i=1}^n (a x_i + b).
+\]
+
+Distributing the summation across terms gives:
+\[
+\frac{1}{n} \left( \sum_{i=1}^n a x_i + \sum_{i=1}^n b \right).
+\]
+
+Next, we can pull the constant $a$ outside of the first summation, and recognize that $\sum_{i=1}^n b = n b$:
+\[
+\frac{1}{n} \left( a \sum_{i=1}^n x_i + n b \right).
+\]
+
+Breaking this apart, we get:
+\[
+\frac{a}{n} \sum_{i=1}^n x_i \;+\; \frac{n b}{n}.
+\]
+
+Simplifying, the first term is $a \bar{x}$ (by the definition of the sample mean), and the second term is simply $b$:
+\[
+a \bar{x} + b.
+\]
+
+Thus, we have shown:
+\[
+\frac{1}{n} \sum_{i=1}^n (a x_i + b) \;=\; a \bar{x} + b.
+\]
+\[
+\boxed{\text{Q.E.D.}}
+\]
+
+
+3b
+
+We want to show that
+\[
+\frac{1}{n} \sum_{i=1}^n (x_i - \bar{x})^2 
+= \frac{1}{n}\sum_{i=1}^n x_i^2 - (\bar{x})^2.
+\]
+
+---
+
+**Proof.**  
+We begin with the left-hand side:
+\[
+\frac{1}{n} \sum_{i=1}^n (x_i - \bar{x})^2.
+\]
+
+Expanding the square gives:
+\[
+\frac{1}{n} \sum_{i=1}^n \left( x_i^2 - 2x_i\bar{x} + \bar{x}^2 \right).
+\]
+
+Separating terms inside the summation:
+\[
+\frac{1}{n} \left( \sum_{i=1}^n x_i^2 - 2\bar{x}\sum_{i=1}^n x_i + \sum_{i=1}^n \bar{x}^2 \right).
+\]
+
+Since $\sum_{i=1}^n x_i = n\bar{x}$ and $\sum_{i=1}^n \bar{x}^2 = n\bar{x}^2$, we obtain:
+\[
+\frac{1}{n} \left( \sum_{i=1}^n x_i^2 - 2n\bar{x}^2 + n\bar{x}^2 \right).
+\]
+
+Simplifying:
+\[
+\frac{1}{n} \left( \sum_{i=1}^n x_i^2 - n\bar{x}^2 \right).
+\]
+
+Breaking apart the fraction yields:
+\[
+\frac{1}{n}\sum_{i=1}^n x_i^2 - \bar{x}^2.
+\]
+
+Thus, we have shown:
+\[
+\frac{1}{n} \sum_{i=1}^n (x_i - \bar{x})^2 
+= \frac{1}{n}\sum_{i=1}^n x_i^2 - (\bar{x})^2.
+\]
+\[
+\boxed{\text{Q.E.D.}}
+\]
